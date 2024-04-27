@@ -1,10 +1,10 @@
 ---
 - name: Check channel variables
   fail:
-    msg: Please check Channel variables for ClusterLogging and ElasticSearch Operators.
+    msg: Please check Channel variables for ClusterLogging and Loki Operators.
   when: >
-        (cluster_logging_channel == "" or elastic_search_channel == "") or
-        (cluster_logging_channel == None or elastic_search_channel == None) 
+        (cluster_logging_channel == "" or loki_channel == "") or
+        (cluster_logging_channel == None or loki_channel == None) 
 
 # Set log_labels
 - set_fact:
@@ -49,7 +49,7 @@
     shell: oc apply -f "{{ role_path }}/files/CatalogSource.yml"
  
   - name: Check ImageContentSourcePolicy and CatalogSource added
-    shell:  oc get CatalogSource -n openshift-marketplace | grep "cluster-logging\|elasticsearch" |wc -l
+    shell:  oc get CatalogSource -n openshift-marketplace | grep "cluster-logging\|loki" |wc -l
     register: output
 
   - name: Fail if CatalogSource not added
@@ -59,11 +59,11 @@
  
   - name: Set fact variable for Subscription
     set_fact:
-      elasticsearch_op_source: "elasticsearch"
+      loki_op_source: "loki"
       cluster_logging_op_source: "cluster-logging"
   when: 
-    - elasticsearch_clf_cs != '' and clusterlogging_clf_cs != '' 
-    - elasticsearch_clf_cs != None and clusterlogging_clf_cs != None
+    - loki_clf_cs != '' and clusterlogging_clf_cs != '' 
+    - loki_clf_cs != None and clusterlogging_clf_cs != None
 
 # Default CatalogSource
 - name: Use default sources
@@ -73,7 +73,7 @@
     register: icsp
 
   - name: Check if the CatalogSource exists
-    shell:  oc get CatalogSource -n openshift-marketplace | grep "cluster-logging\|elasticsearch" |wc -l
+    shell:  oc get CatalogSource -n openshift-marketplace | grep "cluster-logging\|loki" |wc -l
     register: output
 
   - name: Delete ImageContentSourcePolicy if it exists
@@ -81,7 +81,7 @@
     when: icsp.stdout|int == 1
 
   - name: Delete CatalogSource if it exists
-    shell: oc delete CatalogSource elasticsearch cluster-logging -n openshift-marketplace
+    shell: oc delete CatalogSource loki cluster-logging -n openshift-marketplace
     when: output.stdout|int == 2
 
   - name: Set disableAllDefaultSources to false
@@ -90,11 +90,11 @@
 
   - name: Set fact variable for subscription
     set_fact:
-      elasticsearch_op_source: "redhat-operators"
+      loki_op_source: "redhat-operators"
       cluster_logging_op_source: "redhat-operators"
   when: >
-        (elasticsearch_clf_cs == "" or clusterlogging_clf_cs == None) or
-        (clusterlogging_clf_cs == "" or elasticsearch_clf_cs == None) 
+        (loki_clf_cs == "" or clusterlogging_clf_cs == None) or
+        (clusterlogging_clf_cs == "" or loki_clf_cs == None) 
      
 # Check if default storage class has exists
 - name: Check if default storage class has exists
@@ -109,7 +109,7 @@
   when: storage_class.failed
 
 # Creating namespaces 
-- name: Create namespace for elasticsearch and cluster logging
+- name: Create namespace for loki and cluster logging
   k8s:
     state: present
     definition:
@@ -125,8 +125,8 @@
     - openshift-operators-redhat
     - openshift-logging
 
-# Create operator group objects for OpenShift Elasticsearch Operator and Red Hat OpenShift Logging Operator
-- name: Create operator group for Elasticsearch
+# Create operator group objects for OpenShift Loki Operator and Red Hat OpenShift Logging Operator
+- name: Create operator group for Loki
   k8s:
     state: present
     definition:
@@ -168,11 +168,11 @@
         sourceNamespace: openshift-marketplace
   loop:
   - { name: 'cluster-logging', namespace: 'openshift-logging', channel: "{{cluster_logging_channel}}" , cs_src: "{{cluster_logging_op_source}}" }
-  - { name: 'elasticsearch-operator', namespace: 'openshift-operators-redhat', channel: "{{elastic_search_channel}}", cs_src: "{{elasticsearch_op_source}}" }
+  - { name: 'loki-operator', namespace: 'openshift-operators-redhat', channel: "{{loki_channel}}", cs_src: "{{loki_op_source}}" }
 
 # Verify the operator installation.
 - name: Verify the operator installation
-  shell:  oc get csv -n openshift-logging --no-headers | awk '{ if (($1 ~ /^cluster-logging/ || $1 ~ /^elasticsearch-operator/) && $NF=="Succeeded") print $1 }'| wc -l
+  shell:  oc get csv -n openshift-logging --no-headers | awk '{ if (($1 ~ /^cluster-logging/ || $1 ~ /^loki-operator/) && $NF=="Succeeded") print $1 }'| wc -l
   register: operators
   until: operators.stdout|int == 2
   retries: 15
@@ -228,16 +228,16 @@
   shell: kubectl wait --all  --namespace=test-logging --for=condition=Ready pods --timeout=180s
 
 # Clone and deploy acmeair-mainservice-java app in acme-air namespace
-- name: Clone acmeair-mainservice-java repo
-  git:
-    repo: https://github.com/ocp-power-demos/acmeair-mainservice-java.git
-    dest: /root/acmeair-mainservice-java/
+#- name: Clone acmeair-mainservice-java repo
+#  git:
+#    repo: https://github.com/ocp-power-demos/acmeair-mainservice-java.git
+#    dest: /root/acmeair-mainservice-java/
 
-- name: Deployment of acmeair-mainservice-java pods
-  shell: |
-    oc project default
-    sh /root/acmeair-mainservice-java/scripts/deployToOpenshift.sh
-    kubectl wait --all  --namespace=acme-air --for=condition=Ready pods --timeout=300s
+#- name: Deployment of acmeair-mainservice-java pods
+#  shell: |
+#    oc project default
+#    sh /root/acmeair-mainservice-java/scripts/deployToOpenshift.sh
+#    kubectl wait --all  --namespace=acme-air --for=condition=Ready pods --timeout=300s
 
 - name: Pause for 1 minutes to get new logs 
   pause:

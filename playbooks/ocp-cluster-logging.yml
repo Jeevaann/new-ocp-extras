@@ -6,8 +6,8 @@
     include_role:
         name: global-secret-update
     when: 
-      - elasticsearch_clf_cs != "" and clusterlogging_clf_cs != ""
-      - elasticsearch_clf_cs != None and clusterlogging_clf_cs != None
+      - clusterlogging_clf_cs != "" and loki_clf_cs != ""
+      - clusterlogging_clf_cs != None and loki_clf_cs != None
       - clf_clean_up == false
 
   - name: Include the ClusterLogging and ClusterLogForwarding role

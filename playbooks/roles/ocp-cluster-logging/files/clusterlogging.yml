@@ -23,36 +23,9 @@
       spec:
         managementState: "Managed"
         logStore:
-          type: "elasticsearch"
-          retentionPolicy:
-            application:
-              maxAge: 1d
-            infra:
-              maxAge: 7d
-            audit:
-              maxAge: 7d
-          elasticsearch:
-            nodeCount: 3
-            storage:
-              size: 200G
-            resources:
-              requests:
-                memory: "8Gi"
-            proxy:
-              resources:
-                limits:
-                  memory: 256Mi
-                requests:
-                  memory: 256Mi
-            redundancyPolicy: "SingleRedundancy"
-        visualization:
-          type: "kibana"
-          kibana:
-            replicas: 1
-        curation:
-          type: "curator"
-          curator:
-            schedule: "30 3 * * *"
+          type: "lokistack"
+          lokistack:
+            name: lokistack-sample
         collection:
           logs: "{{ collector_spec | from_yaml }}"
   vars:
@@ -60,6 +33,107 @@
       type: {{ collector_type }}
       {{ collector_type }}: {}
   register: cl_cr
+
+# Create a ConfigMap for lokistack
+- name: Create ConfigMap for lokistack
+  k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: lokistack-ca
+        namespace: openshift-logging
+        annotations:
+          service.beta.openshift.io/inject-cabundle: "true"
+
+# Create a Role binding for lokistack
+- name: Create Role binding for lokistack
+  k8s:
+    state: present
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRole
+      metadata:
+        name: lokistack-instance-tenant-logs
+      rules:
+      - apiGroups:
+        - 'loki.grafana.com'
+        resources:
+        - application
+        - infrastructure
+        - audit
+        resourceNames:
+        - logs
+        verbs:
+        - 'get'
+        - 'create'
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRoleBinding
+      metadata:
+        name: lokistack-instance-tenant-logs
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: ClusterRole
+        name: lokistack-instance-tenant-logs
+      subjects:
+      - kind: ServiceAccount
+        name: logcollector
+        namespace: openshift-logging		  
+
+# Create lokistack
+- name: Create lokistack
+  k8s:
+    state: present
+    definition:
+      apiVersion: loki.grafana.com/v1
+      kind: LokiStack
+      metadata:
+        name: lokistack-sample
+        namespace: openshift-logging
+      spec:
+        size: 1x.small
+        replicationFactor: 1
+        storage:
+          secret:
+            name: lokicred-secret
+            type: s3
+        storageClassName: nfs-storage-provisioner
+        tenants:
+          mode: openshift-logging
+        rules:
+          enabled: true
+          selector:
+            matchLabels:
+              openshift.io/cluster-monitoring: 'true'
+          namespaceSelector:
+            matchLabels:
+              openshift.io/cluster-monitoring: 'true'  
+
+# Create a loki log forwarder
+- name: Create loki logforwarder
+  k8s:
+    state: present
+    definition:
+      apiVersion: logging.openshift.io/v1
+      kind: ClusterLogForwarder
+      metadata:
+        name: instance
+        namespace: openshift-logging
+      spec:
+        pipelines:
+          - name: all-to-default
+            inputRefs:
+            - infrastructure
+            - application
+            - audit
+            outputRefs:
+            - default			  
+
+- name: Check lokistack secret exists
+  shell: oc get secret -n openshift-logging | grep "lokicred-secret" | wc -l
+  register: lokisecret
+  failed_when: lokisecret.stdout|int == 0
 
 # Check if deployment is successfull
 - name: Check the deployment
@@ -93,8 +167,8 @@
       delay: 90
       ignore_errors: yes
   when: cl_cr.changed and check_cl.stdout|int != 0
-  
-- name: Get error state pods 
+
+- name: Get error state pods
   shell: oc get pod -n openshift-logging | grep Error| wc -l
   register: err_pods
 
